@@ -124,6 +124,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func handleWakeWord() {
+        PerfTimer.shared.reset()
+        PerfTimer.shared.start("1_WakeToReady")
         PaulLogger.log("[Paul] Aktiviert!")
 
         wakeWordDetector.stopListening()
@@ -136,6 +138,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PaulLogger.log("[Paul] Begrüßung aus Cache, spiele sofort ab...")
             audioPlayer.onPlaybackComplete = { [weak self] in
                 Task { @MainActor in
+                    PerfTimer.shared.end("1_WakeToReady")
+                    PerfTimer.shared.start("2_Recording")
                     PaulLogger.log("[Paul] Begrüßung fertig, starte Aufnahme...")
                     self?.stateManager.transition(to: .listening)
                     self?.audioRecorder.startRecording()
@@ -177,13 +181,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.removeItem(at: audioURL)
             return
         }
+        PerfTimer.shared.end("2_Recording")
         PaulLogger.log("[Paul] Aufnahme fertig: \(audioURL.lastPathComponent)")
         stateManager.cancelTimers()
 
         do {
             // Speech-to-Text (bleibt im Listening-State während Whisper läuft)
+            PerfTimer.shared.start("3_Whisper")
             PaulLogger.log("[Paul] Whisper STT startet...")
             let transcription = try await WhisperService.shared.transcribe(audioURL: audioURL)
+            PerfTimer.shared.end("3_Whisper")
             PaulLogger.log("[Paul] Transkription: \"\(transcription)\"")
 
             // Leere oder Whisper-Halluzinationen filtern
@@ -210,6 +217,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stateManager.transcribedText = transcription
 
             // An OpenClaw senden
+            PerfTimer.shared.start("4_OpenClaw")
             var responseText: String
             if openClawClient.isConnected {
                 PaulLogger.log("[Paul] Sende an OpenClaw: \(transcription)")
@@ -218,6 +226,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 responseText = "OpenClaw ist nicht verbunden. Du hast gesagt: \(transcription)"
             }
+            PerfTimer.shared.end("4_OpenClaw")
 
             // Leere oder Platzhalter-Antworten abfangen
             let cleanedResponse = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,9 +238,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PaulLogger.log("[Paul] Antwort: \(responseText.prefix(100))...")
 
             // Text-to-Speech: erst puffern, dann Speaking-State
+            PerfTimer.shared.start("5_TTS")
             PaulLogger.log("[Paul] TTS Antwort wird geladen...")
             let audioData = try await TTSService.shared.synthesize(text: responseText)
+            PerfTimer.shared.end("5_TTS")
             PaulLogger.log("[Paul] TTS Antwort gepuffert (\(audioData.count) bytes), wechsle zu Speaking")
+            PerfTimer.shared.summary()
 
             stateManager.transition(to: .speaking)
             stateManager.subtitleText = responseText
