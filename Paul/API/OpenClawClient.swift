@@ -79,7 +79,7 @@ class OpenClawClient: ObservableObject {
 
             // Timeout - nur wenn dieser Request noch aktiv ist
             Task {
-                try? await Task.sleep(nanoseconds: 120_000_000_000)
+                try? await Task.sleep(nanoseconds: 180_000_000_000)
                 if self.chatRequestId == thisRequestId, let cont = self.chatContinuation {
                     self.chatContinuation = nil
                     self.chatRequestId = nil

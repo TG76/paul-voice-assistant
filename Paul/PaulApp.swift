@@ -66,6 +66,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.tryReturnToSleep()
         }
 
+        // ESC-Taste zum Abbrechen
+        overlayController.onEscapePressed = { [weak self] in
+            Task { @MainActor in
+                self?.handleEscapeKey()
+            }
+        }
+
         // OpenClaw verbinden
         openClawClient.connect()
 
@@ -321,6 +328,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         overlayController.hide()
         stateManager.transition(to: .sleep)
 
+        wakeWordDetector.startListening(force: true)
+    }
+
+    @MainActor
+    private func handleEscapeKey() {
+        let state = stateManager.currentState
+        guard state != .sleep else { return }
+
+        PaulLogger.log("[Paul] ESC gedrückt - Abbruch (war: \(state.rawValue))")
+
+        // Audio stoppen falls es läuft
+        audioPlayer.stop()
+        lipSyncTimer?.invalidate()
+        lipSyncTimer = nil
+
+        // Aufnahme stoppen
+        audioRecorder.onRecordingComplete = nil
+        audioRecorder.stopRecording()
+
+        // Callback wieder setzen
+        audioRecorder.onRecordingComplete = { [weak self] audioURL in
+            Task { @MainActor in
+                await self?.processRecording(audioURL: audioURL)
+            }
+        }
+
+        // Zurück zu Sleep
+        stateManager.cancelTimers()
+        overlayController.hide()
+        stateManager.transition(to: .sleep)
         wakeWordDetector.startListening(force: true)
     }
 

@@ -1,4 +1,22 @@
 import SwiftUI
+import Carbon.HIToolbox
+
+// MARK: - Custom Window that accepts key events
+
+class KeyableWindow: NSWindow {
+    var onEscapePressed: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Escape) {
+            onEscapePressed?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
 
 struct OverlayView: View {
     @ObservedObject var stateManager: StateManager
@@ -9,8 +27,8 @@ struct OverlayView: View {
             Color.black.opacity(0.75)
                 .ignoresSafeArea()
 
-            // Avatar zentriert
-            AvatarView(
+            // Chibi Avatar zentriert
+            ChibiAvatarView(
                 state: stateManager.currentState,
                 audioLevel: stateManager.audioLevel
             )
@@ -58,15 +76,14 @@ struct MiniOverlayView: View {
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.black.opacity(0.85))
 
-                AvatarView(
+                ChibiAvatarView(
                     state: stateManager.currentState,
                     audioLevel: stateManager.audioLevel
                 )
-                .scaleEffect(0.2)
-                .frame(width: 150, height: 150)
-                .clipped()
+                .scaleEffect(0.35)
             }
             .frame(width: 150, height: 150)
+            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 20))
 
             if stateManager.isRecording {
@@ -83,22 +100,26 @@ struct MiniOverlayView: View {
                 .transition(.opacity)
             }
         }
+        .frame(height: 190, alignment: .top)
     }
 }
 
 class OverlayWindowController {
-    private var fullWindow: NSWindow?
-    private var miniWindow: NSWindow?
+    private var fullWindow: KeyableWindow?
+    private var miniWindow: KeyableWindow?
+
+    var onEscapePressed: (() -> Void)?
 
     func showFull() {
         hideMini()
         guard fullWindow == nil else {
             fullWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
         guard let screen = NSScreen.main else { return }
 
-        let window = NSWindow(
+        let window = KeyableWindow(
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
@@ -110,11 +131,15 @@ class OverlayWindowController {
         window.backgroundColor = .clear
         window.ignoresMouseEvents = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.onEscapePressed = { [weak self] in
+            self?.onEscapePressed?()
+        }
 
         let overlayView = OverlayView(stateManager: StateManager.shared)
         window.contentView = NSHostingView(rootView: overlayView)
 
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         fullWindow = window
     }
 
@@ -122,6 +147,7 @@ class OverlayWindowController {
         hideFull()
         guard miniWindow == nil else {
             miniWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
         guard let screen = NSScreen.main else { return }
@@ -136,7 +162,7 @@ class OverlayWindowController {
             height: height
         )
 
-        let window = NSWindow(
+        let window = KeyableWindow(
             contentRect: frame,
             styleMask: [.borderless],
             backing: .buffered,
@@ -147,13 +173,17 @@ class OverlayWindowController {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
-        window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = false  // Muss false sein für Key-Events
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.onEscapePressed = { [weak self] in
+            self?.onEscapePressed?()
+        }
 
         let miniView = MiniOverlayView(stateManager: StateManager.shared)
         window.contentView = NSHostingView(rootView: miniView)
 
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         miniWindow = window
     }
 
