@@ -20,5 +20,7 @@
     <string>Paul nutzt Spracherkennung um auf das Wake-Word "Paul" zu hören.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Paul verbindet sich mit dem lokalen OpenClaw Gateway.</string>
+    <key>NSAppSleepDisabled</key>
+    <true/>
 </dict>
 </plist>
