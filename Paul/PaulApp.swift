@@ -210,7 +210,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stateManager.transcribedText = transcription
 
             // An OpenClaw senden
-            let responseText: String
+            var responseText: String
             if openClawClient.isConnected {
                 PaulLogger.log("[Paul] Sende an OpenClaw: \(transcription)")
                 let clawResponse = try await openClawClient.sendMessage(text: transcription)
@@ -218,6 +218,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 responseText = "OpenClaw ist nicht verbunden. Du hast gesagt: \(transcription)"
             }
+
+            // Leere oder Platzhalter-Antworten abfangen
+            let cleanedResponse = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanedResponse.isEmpty || cleanedResponse == "..." || cleanedResponse == "…" || cleanedResponse.count < 3 {
+                PaulLogger.log("[Paul] Leere Antwort von OpenClaw, verwende Fallback")
+                responseText = "Hmm, da kam leider keine Antwort. Versuch es nochmal."
+            }
+
             PaulLogger.log("[Paul] Antwort: \(responseText.prefix(100))...")
 
             // Text-to-Speech: erst puffern, dann Speaking-State
