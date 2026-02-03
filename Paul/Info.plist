@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Paul</string>
+    <key>CFBundleDisplayName</key>
+    <string>Paul</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.paul.voiceassistant</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Paul braucht Zugriff auf das Mikrofon für Spracherkennung und Wake-Word-Erkennung.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Paul nutzt Spracherkennung um auf das Wake-Word "Paul" zu hören.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Paul verbindet sich mit dem lokalen OpenClaw Gateway.</string>
+</dict>
+</plist>
