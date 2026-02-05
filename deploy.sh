@@ -8,11 +8,12 @@ REMOTE="paul@192.168.1.89"
 REMOTE_PATH="~/Paul/paul-voice-assistant"
 LOCAL_PATH="/Users/tg/Paul/paul-voice-assistant"
 IDENTIFIER="com.paul.voiceassistant"
+INSTALL_PATH="~/bin/Paul"
 
 echo "=== Paul Voice Assistant Deploy ==="
 
 # 1. Sync source files
-echo "[1/4] Syncing source files..."
+echo "[1/5] Syncing source files..."
 rsync -av --delete \
     --exclude '.build' \
     --exclude '.git' \
@@ -23,15 +24,19 @@ rsync -av --delete \
 rsync -av "$LOCAL_PATH/Package.swift" "$REMOTE:$REMOTE_PATH/"
 
 # 2. Build on remote (x86_64)
-echo "[2/4] Building on remote (x86_64)..."
+echo "[2/5] Building on remote (x86_64)..."
 ssh "$REMOTE" "cd $REMOTE_PATH && swift build -c release --arch x86_64 2>&1 | tail -5"
 
-# 3. Sign with stable identifier
-echo "[3/4] Signing binary..."
-ssh "$REMOTE" "codesign -s - -f --identifier '$IDENTIFIER' $REMOTE_PATH/.build/release/Paul"
+# 3. Copy to stable location
+echo "[3/5] Installing to $INSTALL_PATH..."
+ssh "$REMOTE" "mkdir -p ~/bin && cp $REMOTE_PATH/.build/release/Paul $INSTALL_PATH"
 
-# 4. Restart LaunchAgent
-echo "[4/4] Restarting Paul..."
+# 4. Sign with stable identifier
+echo "[4/5] Signing binary..."
+ssh "$REMOTE" "codesign -s - -f --identifier '$IDENTIFIER' $INSTALL_PATH"
+
+# 5. Restart LaunchAgent
+echo "[5/5] Restarting Paul..."
 ssh "$REMOTE" "launchctl stop com.paul.assistant 2>/dev/null || true; sleep 1; launchctl start com.paul.assistant"
 
 # Verify
