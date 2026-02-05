@@ -55,9 +55,15 @@ class OpenClawClient: ObservableObject {
             self.chatRequestId = thisRequestId
 
             let reqId = UUID().uuidString
+            let systemPrompt = """
+            WICHTIG für diese Antwort: Du antwortest über einen Sprachassistenten (Text-to-Speech).
+            - Formuliere als gesprochenen Fließtext, KEINE Stichpunkte/Bulletpoints/Listen
+            - Keine Markdown-Formatierung (**, ##, etc.)
+            - Kurz und prägnant antworten
+            """
             let params: [String: Any] = [
-                "sessionKey": "agent:main:main",
-                "message": text,
+                "sessionKey": "agent:main:paul-voice",
+                "message": "[\(systemPrompt)]\n\n\(text)",
                 "idempotencyKey": UUID().uuidString,
             ]
 
