@@ -222,39 +222,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             PaulLogger.log("[Paul] Antwort: \(responseText.prefix(100))...")
 
-            // Text-to-Speech: erst puffern, dann Speaking-State
+            // TTS Streaming: sofort Speaking-State, Audio streamen
             PerfTimer.shared.start("4_TTS")
-            PaulLogger.log("[Paul] TTS Antwort wird geladen...")
-            let audioData = try await TTSService.shared.synthesize(text: responseText)
-            PerfTimer.shared.end("4_TTS")
-            PaulLogger.log("[Paul] TTS Antwort gepuffert (\(audioData.count) bytes), wechsle zu Speaking")
-            PerfTimer.shared.summary()
+            PaulLogger.log("[Paul] TTS Streaming startet...")
 
             stateManager.transition(to: .speaking)
             stateManager.subtitleText = responseText
 
-            audioPlayer.enableMetering()
             audioPlayer.onPlaybackComplete = { [weak self] in
                 Task { @MainActor in
                     self?.handlePlaybackComplete()
                 }
             }
-            audioPlayer.play(data: audioData)
+            audioPlayer.startStreaming()
             startLipSyncTimer()
+
+            var firstChunk = true
+            for try await chunk in TTSService.shared.synthesizeStreaming(text: responseText) {
+                if firstChunk {
+                    PerfTimer.shared.end("4_TTS")
+                    PaulLogger.log("[Paul] Erster TTS-Chunk angekommen, Playback startet")
+                    PerfTimer.shared.summary()
+                    firstChunk = false
+                }
+                audioPlayer.scheduleBuffer(pcmData: chunk)
+            }
+            audioPlayer.finishStreaming()
 
         } catch {
             PaulLogger.log("[Paul] Fehler: \(error)")
-            stateManager.subtitleText = "Entschuldigung, da ist etwas schiefgelaufen."
+            let errorText = "Entschuldigung, da ist etwas schiefgelaufen."
+            stateManager.subtitleText = errorText
+            stateManager.transition(to: .speaking)
 
-            Task {
-                if let audioData = try? await TTSService.shared.synthesize(text: "Entschuldigung, da ist etwas schiefgelaufen.") {
-                    audioPlayer.onPlaybackComplete = { [weak self] in
-                        Task { @MainActor in self?.handlePlaybackComplete() }
-                    }
-                    audioPlayer.play(data: audioData)
-                } else {
-                    handlePlaybackComplete()
-                }
+            audioPlayer.onPlaybackComplete = { [weak self] in
+                Task { @MainActor in self?.handlePlaybackComplete() }
+            }
+
+            // Fallback auf non-streaming TTS für Fehlermeldungen
+            if let audioData = try? await TTSService.shared.synthesize(text: errorText) {
+                audioPlayer.play(data: audioData)
+            } else {
+                handlePlaybackComplete()
             }
         }
     }
