@@ -222,32 +222,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             PaulLogger.log("[Paul] Antwort: \(responseText.prefix(100))...")
 
-            // TTS Streaming: sofort Speaking-State, Audio streamen
+            // Text-to-Speech
             PerfTimer.shared.start("4_TTS")
-            PaulLogger.log("[Paul] TTS Streaming startet...")
+            PaulLogger.log("[Paul] TTS wird geladen...")
+            let audioData = try await TTSService.shared.synthesize(text: responseText)
+            PerfTimer.shared.end("4_TTS")
+            PaulLogger.log("[Paul] TTS geladen (\(audioData.count) bytes)")
+            PerfTimer.shared.summary()
 
             stateManager.transition(to: .speaking)
             stateManager.subtitleText = responseText
 
+            audioPlayer.enableMetering()
             audioPlayer.onPlaybackComplete = { [weak self] in
                 Task { @MainActor in
                     self?.handlePlaybackComplete()
                 }
             }
-            audioPlayer.startStreaming()
+            audioPlayer.play(data: audioData)
             startLipSyncTimer()
-
-            var firstChunk = true
-            for try await chunk in TTSService.shared.synthesizeStreaming(text: responseText) {
-                if firstChunk {
-                    PerfTimer.shared.end("4_TTS")
-                    PaulLogger.log("[Paul] Erster TTS-Chunk angekommen, Playback startet")
-                    PerfTimer.shared.summary()
-                    firstChunk = false
-                }
-                audioPlayer.scheduleBuffer(pcmData: chunk)
-            }
-            audioPlayer.finishStreaming()
 
         } catch {
             PaulLogger.log("[Paul] Fehler: \(error)")
