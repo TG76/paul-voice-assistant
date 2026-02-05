@@ -33,7 +33,7 @@ enum AppSettings {
     static let ttsSpeed = 1.2
 
     static let silenceThreshold: Float = 0.01
-    static let silenceDuration: TimeInterval = 4.0
+    static let silenceDuration: TimeInterval = 2.0
     static let followUpTimeout: TimeInterval = 5.0
     static let displayOffDelay: TimeInterval = 3.0
 }
