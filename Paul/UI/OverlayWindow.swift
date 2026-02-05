@@ -107,6 +107,7 @@ struct MiniOverlayView: View {
 class OverlayWindowController {
     private var fullWindow: KeyableWindow?
     private var miniWindow: KeyableWindow?
+    private var globalEscMonitor: Any?
 
     var onEscapePressed: (() -> Void)?
 
@@ -199,10 +200,31 @@ class OverlayWindowController {
 
     func show() {
         showFull()
+        startGlobalEscMonitor()
     }
 
     func hide() {
         hideFull()
         hideMini()
+        stopGlobalEscMonitor()
+    }
+
+    /// Globaler ESC-Monitor: fängt ESC auch ab wenn Paul nicht den Fokus hat
+    private func startGlobalEscMonitor() {
+        guard globalEscMonitor == nil else { return }
+        globalEscMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // kVK_Escape
+                DispatchQueue.main.async {
+                    self?.onEscapePressed?()
+                }
+            }
+        }
+    }
+
+    private func stopGlobalEscMonitor() {
+        if let monitor = globalEscMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalEscMonitor = nil
+        }
     }
 }

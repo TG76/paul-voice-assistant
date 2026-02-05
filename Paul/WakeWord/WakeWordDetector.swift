@@ -1,6 +1,7 @@
 import Foundation
 import Speech
 import AVFoundation
+import AppKit
 
 class WakeWordDetector: ObservableObject {
     static let shared = WakeWordDetector()
@@ -24,8 +25,52 @@ class WakeWordDetector: ObservableObject {
     private var lastPartialResult: String = ""
     private var statusCheckTimer: Timer?
 
+    /// Ob wir aktiv lauschen sollten (für Auto-Restart nach Display-Wake)
+    private var shouldBeListening: Bool = false
+
+    private init() {
+        setupDisplayWakeNotification()
+    }
+
+    /// Lauscht auf Display-Wake um die Erkennung neu zu starten
+    private func setupDisplayWakeNotification() {
+        // Wenn Display aufwacht, Erkennung neu starten
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            PaulLogger.log("[WakeWord] Display aufgewacht, prüfe Status...")
+            if self.shouldBeListening && !self.audioEngine.isRunning {
+                PaulLogger.log("[WakeWord] AudioEngine war gestoppt, starte neu...")
+                self.startListening(force: true)
+            }
+        }
+
+        // Auch auf System-Wake lauschen
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            PaulLogger.log("[WakeWord] System aufgewacht, prüfe Status...")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if self.shouldBeListening && !self.audioEngine.isRunning {
+                    PaulLogger.log("[WakeWord] AudioEngine war gestoppt nach System-Wake, starte neu...")
+                    self.startListening(force: true)
+                }
+            }
+        }
+
+        PaulLogger.log("[WakeWord] Display/System-Wake Notifications registriert")
+    }
+
     func startListening(force: Bool = false) {
         PaulLogger.log("[WakeWord] startListening aufgerufen (force=\(force), isListening=\(isListening), gen=\(generation))")
+
+        shouldBeListening = true
 
         if isListening && !force {
             PaulLogger.log("[WakeWord] Bereits aktiv, überspringe")
@@ -34,7 +79,7 @@ class WakeWordDetector: ObservableObject {
         }
         if isListening {
             PaulLogger.log("[WakeWord] War aktiv, stoppe erst...")
-            stopListening()
+            stopListeningInternal()
         }
 
         generation += 1
@@ -221,7 +266,8 @@ class WakeWordDetector: ObservableObject {
 
                 if text.contains(self.wakeWord) {
                     PaulLogger.log("[WakeWord] *** WAKE WORD ERKANNT! *** Text: '\(text)'")
-                    self.stopListening()
+                    self.shouldBeListening = false  // Bewusst gestoppt
+                    self.stopListeningInternal()
                     DispatchQueue.main.async {
                         PaulLogger.log("[WakeWord] Rufe onWakeWordDetected callback auf...")
                         self.onWakeWordDetected?()
@@ -237,7 +283,8 @@ class WakeWordDetector: ObservableObject {
                 if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
                     PaulLogger.log("[WakeWord] Underlying Error: \(underlying.domain) Code: \(underlying.code)")
                 }
-                self.stopListening()
+                // shouldBeListening bleibt true für Retry
+                self.stopListeningInternal()
                 self.scheduleRetry(generation: gen)
             }
         }
@@ -251,13 +298,19 @@ class WakeWordDetector: ObservableObject {
 
     private func startStatusCheckTimer(generation gen: Int) {
         statusCheckTimer?.invalidate()
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             guard self.generation == gen else {
                 self.statusCheckTimer?.invalidate()
                 return
             }
             self.logDetailedStatus()
+
+            // Auto-Restart wenn AudioEngine unerwartet gestoppt
+            if self.shouldBeListening && !self.audioEngine.isRunning {
+                PaulLogger.log("[WakeWord] AudioEngine unerwartet gestoppt, starte neu...")
+                self.startListening(force: true)
+            }
         }
     }
 
@@ -305,7 +358,14 @@ class WakeWordDetector: ObservableObject {
     }
 
     func stopListening() {
-        PaulLogger.log("[WakeWord] stopListening aufgerufen")
+        PaulLogger.log("[WakeWord] stopListening aufgerufen (öffentlich)")
+        shouldBeListening = false
+        stopListeningInternal()
+    }
+
+    /// Interne Stopp-Funktion, setzt shouldBeListening NICHT zurück
+    private func stopListeningInternal() {
+        PaulLogger.log("[WakeWord] stopListeningInternal aufgerufen")
         statusCheckTimer?.invalidate()
         statusCheckTimer = nil
 

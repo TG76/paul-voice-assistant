@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage("openai_api_key") var openAIKey = ""
     @AppStorage("picovoice_access_key") var picovoiceKey = ""
     @AppStorage("openclaw_gateway_token") var gatewayToken = ""
+    @AppStorage("followup_enabled") var followUpEnabled = true
 
     var body: some View {
         Form {
@@ -28,6 +29,9 @@ struct SettingsView: View {
             Section("OpenClaw") {
                 SecureField("Gateway Token", text: $gatewayToken)
             }
+            Section("Verhalten") {
+                Toggle("Follow-up (Rückfrage nach Antwort)", isOn: $followUpEnabled)
+            }
         }
         .padding()
         .frame(width: 400)
@@ -37,7 +41,7 @@ struct SettingsView: View {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let overlayController = OverlayWindowController()
-    private let audioRecorder = AudioRecorder()
+    private let liveTranscriber = LiveTranscriber()
     private let audioPlayer = AudioPlayer()
     private let stateManager = StateManager.shared
     private let wakeWordDetector = WakeWordDetector.shared
@@ -112,9 +116,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupAudioPipeline() {
-        audioRecorder.onRecordingComplete = { [weak self] audioURL in
+        liveTranscriber.onTranscriptionComplete = { [weak self] text in
             Task { @MainActor in
-                await self?.processRecording(audioURL: audioURL)
+                await self?.processTranscription(text: text)
             }
         }
     }
@@ -142,7 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     PerfTimer.shared.start("2_Recording")
                     PaulLogger.log("[Paul] Begrüßung fertig, starte Aufnahme...")
                     self?.stateManager.transition(to: .listening)
-                    self?.audioRecorder.startRecording()
+                    self?.liveTranscriber.startTranscribing()
                 }
             }
             audioPlayer.play(data: cached)
@@ -161,72 +165,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     Task { @MainActor in
                         PaulLogger.log("[Paul] Begrüßung fertig, starte Aufnahme...")
                         self?.stateManager.transition(to: .listening)
-                        self?.audioRecorder.startRecording()
+                        self?.liveTranscriber.startTranscribing()
                     }
                 }
                 audioPlayer.play(data: audioData)
             } catch {
                 PaulLogger.log("[Paul] TTS Fehler: \(error) - starte direkt")
                 stateManager.transition(to: .listening)
-                audioRecorder.startRecording()
+                liveTranscriber.startTranscribing()
             }
         }
     }
 
     @MainActor
-    private func processRecording(audioURL: URL) async {
-        // Wenn wir bereits schlafen, Aufnahme ignorieren
+    private func processTranscription(text: String) async {
+        // Wenn wir bereits schlafen, ignorieren
         if stateManager.currentState == .sleep {
-            PaulLogger.log("[Paul] Aufnahme ignoriert (bereits im Sleep)")
-            try? FileManager.default.removeItem(at: audioURL)
+            PaulLogger.log("[Paul] Transkription ignoriert (bereits im Sleep)")
             return
         }
         PerfTimer.shared.end("2_Recording")
-        PaulLogger.log("[Paul] Aufnahme fertig: \(audioURL.lastPathComponent)")
+        PaulLogger.log("[Paul] Live-STT fertig: \"\(text)\"")
         stateManager.cancelTimers()
 
+        // Leere Eingabe filtern
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.isEmpty || cleaned.count < 3 {
+            PaulLogger.log("[Paul] Leere/kurze Eingabe: \"\(cleaned)\" → Sleep")
+            returnToSleep()
+            return
+        }
+
         do {
-            // Speech-to-Text (bleibt im Listening-State während Whisper läuft)
-            PerfTimer.shared.start("3_Whisper")
-            PaulLogger.log("[Paul] Whisper STT startet...")
-            let transcription = try await WhisperService.shared.transcribe(audioURL: audioURL)
-            PerfTimer.shared.end("3_Whisper")
-            PaulLogger.log("[Paul] Transkription: \"\(transcription)\"")
-
-            // Leere oder Whisper-Halluzinationen filtern
-            let cleaned = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hallucinations = [
-                "amara.org", "untertitel", "subtitle", "transcription",
-                "thank you for watching", "thanks for watching",
-                "vielen dank", "danke fürs zuschauen", "bis zum nächsten mal",
-                "copyright", "www.", ".com", ".org", ".de",
-            ]
-            let isHallucination = cleaned.isEmpty
-                || cleaned.count < 3
-                || hallucinations.contains(where: { cleaned.lowercased().contains($0) })
-
-            if isHallucination {
-                PaulLogger.log("[Paul] Halluzination/Stille gefiltert: \"\(cleaned)\" → Sleep")
-                returnToSleep()
-                return
-            }
-
-            // Erst jetzt in Thinking wechseln - echte Eingabe erkannt
+            // Direkt in Thinking wechseln - Text ist bereits da!
             stateManager.transition(to: .thinking)
-
-            stateManager.transcribedText = transcription
+            stateManager.transcribedText = text
 
             // An OpenClaw senden
-            PerfTimer.shared.start("4_OpenClaw")
+            PerfTimer.shared.start("3_OpenClaw")
             var responseText: String
             if openClawClient.isConnected {
-                PaulLogger.log("[Paul] Sende an OpenClaw: \(transcription)")
-                let clawResponse = try await openClawClient.sendMessage(text: transcription)
+                PaulLogger.log("[Paul] Sende an OpenClaw: \(text)")
+                let clawResponse = try await openClawClient.sendMessage(text: text)
                 responseText = clawResponse.text
             } else {
-                responseText = "OpenClaw ist nicht verbunden. Du hast gesagt: \(transcription)"
+                responseText = "OpenClaw ist nicht verbunden. Du hast gesagt: \(text)"
             }
-            PerfTimer.shared.end("4_OpenClaw")
+            PerfTimer.shared.end("3_OpenClaw")
 
             // Leere oder Platzhalter-Antworten abfangen
             let cleanedResponse = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -238,10 +223,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PaulLogger.log("[Paul] Antwort: \(responseText.prefix(100))...")
 
             // Text-to-Speech: erst puffern, dann Speaking-State
-            PerfTimer.shared.start("5_TTS")
+            PerfTimer.shared.start("4_TTS")
             PaulLogger.log("[Paul] TTS Antwort wird geladen...")
             let audioData = try await TTSService.shared.synthesize(text: responseText)
-            PerfTimer.shared.end("5_TTS")
+            PerfTimer.shared.end("4_TTS")
             PaulLogger.log("[Paul] TTS Antwort gepuffert (\(audioData.count) bytes), wechsle zu Speaking")
             PerfTimer.shared.summary()
 
@@ -272,8 +257,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
-        try? FileManager.default.removeItem(at: audioURL)
     }
 
     private var lipSyncTimer: Timer?
@@ -293,19 +276,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func handlePlaybackComplete() {
-        PaulLogger.log("[Paul] Playback fertig, warte auf Follow-up...")
         lipSyncTimer?.invalidate()
         lipSyncTimer = nil
         stateManager.audioLevel = 0
-
         stateManager.subtitleText = ""
+
+        let followUpEnabled = UserDefaults.standard.bool(forKey: "followup_enabled")
+        // Default: true (wenn noch nie gesetzt)
+        let isEnabled = UserDefaults.standard.object(forKey: "followup_enabled") == nil ? true : followUpEnabled
+
+        guard isEnabled else {
+            PaulLogger.log("[Paul] Playback fertig, Follow-up deaktiviert → Sleep")
+            returnToSleep()
+            return
+        }
+
+        PaulLogger.log("[Paul] Playback fertig, warte auf Follow-up...")
         stateManager.transition(to: .listening)
 
         // Vollbild-Overlay weg, Mini-Avatar in die Ecke
         overlayController.showMini()
 
-        // Aufnahme starten für Follow-up
-        audioRecorder.startRecording()
+        // Live-Transkription starten für Follow-up (Stille-Timer erst nach Sprache)
+        liveTranscriber.startTranscribing(waitForSpeech: true)
 
         // Timeout: wenn nichts kommt → Sleep
         stateManager.startFollowUpTimer()
@@ -321,7 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // Wenn noch aufgenommen wird und Silence Detector noch nicht ausgelöst hat, warten
-        if audioRecorder.isRecording {
+        if liveTranscriber.isRecording {
             PaulLogger.log("[Paul] Sleep aufgeschoben, Aufnahme läuft noch")
             stateManager.startFollowUpTimer()
             return
@@ -336,13 +329,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         stateManager.cancelTimers()
         lipSyncTimer?.invalidate()
         lipSyncTimer = nil
-        // Callback entfernen BEVOR stopRecording, damit kein processRecording mehr auslöst
-        audioRecorder.onRecordingComplete = nil
-        audioRecorder.stopRecording()
+        // Callback entfernen BEVOR stopTranscribing, damit kein processTranscription mehr auslöst
+        liveTranscriber.onTranscriptionComplete = nil
+        liveTranscriber.stopTranscribing()
         // Callback wieder setzen für nächste Session
-        audioRecorder.onRecordingComplete = { [weak self] audioURL in
+        liveTranscriber.onTranscriptionComplete = { [weak self] text in
             Task { @MainActor in
-                await self?.processRecording(audioURL: audioURL)
+                await self?.processTranscription(text: text)
             }
         }
         overlayController.hide()
@@ -363,14 +356,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lipSyncTimer?.invalidate()
         lipSyncTimer = nil
 
-        // Aufnahme stoppen
-        audioRecorder.onRecordingComplete = nil
-        audioRecorder.stopRecording()
+        // Transkription stoppen
+        liveTranscriber.onTranscriptionComplete = nil
+        liveTranscriber.stopTranscribing()
 
         // Callback wieder setzen
-        audioRecorder.onRecordingComplete = { [weak self] audioURL in
+        liveTranscriber.onTranscriptionComplete = { [weak self] text in
             Task { @MainActor in
-                await self?.processRecording(audioURL: audioURL)
+                await self?.processTranscription(text: text)
             }
         }
 

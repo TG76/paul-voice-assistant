@@ -224,6 +224,13 @@ class OpenClawClient: ObservableObject {
     private func handleChatEvent(_ payload: [String: Any]) {
         guard let state = payload["state"] as? String else { return }
 
+        // Nur Events für unseren aktuellen Run verarbeiten
+        let eventRunId = payload["runId"] as? String
+        if let eventRunId = eventRunId, let currentRunId = currentRunId, eventRunId != currentRunId {
+            PaulLogger.log("[OpenClaw] Ignoriere Event für fremden runId: \(eventRunId.prefix(8))... (erwartet: \(currentRunId.prefix(8))...)")
+            return
+        }
+
         switch state {
         case "delta":
             if let message = payload["message"] as? [String: Any],
@@ -242,7 +249,7 @@ class OpenClawClient: ObservableObject {
                 finalText = text
             }
 
-            PaulLogger.log("[OpenClaw] Antwort: \(finalText.prefix(100))...")
+            PaulLogger.log("[OpenClaw] Antwort (runId=\(eventRunId?.prefix(8) ?? "nil")): \(finalText.prefix(100))...")
             let response = OpenClawResponse(text: finalText, images: [], urls: [])
             chatContinuation?.resume(returning: response)
             chatContinuation = nil

@@ -5,7 +5,7 @@ Paul is a native macOS voice assistant that connects to [OpenClaw](https://openc
 ## Features
 
 - **Wake Word Detection** - Always-on listening for "Paul" using Apple Speech Recognition
-- **Speech-to-Text** - OpenAI Whisper API for accurate German transcription
+- **Live Speech-to-Text** - Apple Speech Recognition (on-device, German) with real-time transcription
 - **AI Responses** - Full OpenClaw integration via Gateway WebSocket (protocol v3)
 - **Text-to-Speech** - OpenAI TTS with configurable voice and speed
 - **Animated Avatar** - Minimalist white-on-black face with state-dependent expressions (listening, thinking, speaking)
@@ -13,20 +13,19 @@ Paul is a native macOS voice assistant that connects to [OpenClaw](https://openc
 - **Silence Detection** - Automatic end-of-speech detection (VAD)
 - **Follow-up Conversations** - After an answer, Paul listens briefly for follow-up questions
 - **Display Control** - Wakes display on activation, prevents sleep during interaction
+- **Display Wake Recovery** - Auto-restarts wake word detection after display sleep/wake
+- **Global Escape** - ESC key aborts interaction even without window focus
+- **Configurable Follow-up** - Toggle follow-up listening in Settings
 
 ## Architecture
 
 ```
-  "Paul"                        Wake Word
+  "hey paul"                    Wake Word
   ──────> WakeWordDetector ────> handleWakeWord()
           (Apple Speech)              |
                                       v
-                               AudioRecorder
-                              (AVAudioEngine)
-                                      |
-                                      v
-                              WhisperService
-                            (OpenAI Whisper API)
+                              LiveTranscriber
+                            (Apple Speech, de-DE)
                                       |
                                       v
                               OpenClawClient ───> OpenClaw Gateway
@@ -70,7 +69,8 @@ PaulApp/
     │   └── WhisperService.swift   # OpenAI Speech-to-Text
     ├── Audio/
     │   ├── AudioPlayer.swift      # AVAudioPlayer wrapper with metering
-    │   ├── AudioRecorder.swift    # AVAudioEngine recording
+    │   ├── AudioRecorder.swift    # AVAudioEngine recording (legacy)
+    │   ├── LiveTranscriber.swift  # Real-time Apple Speech Recognition
     │   └── SilenceDetector.swift  # RMS-based voice activity detection
     ├── Config/
     │   ├── Logger.swift           # File-based logger (~/Paul/paul.log)
@@ -91,7 +91,7 @@ PaulApp/
 
 - macOS 14+ (Sonoma)
 - Swift 5.10+
-- OpenAI API key (for Whisper STT and TTS)
+- OpenAI API key (for TTS)
 - OpenClaw Gateway running locally (port 18789)
 - Microphone permission
 - Speech Recognition permission (Dictation must be enabled in System Settings)
@@ -111,7 +111,7 @@ Paul reads configuration from environment variables with fallback to UserDefault
 | Parameter | Value | Description |
 |---|---|---|
 | `ttsVoice` | `onyx` | TTS voice (alloy, echo, fable, onyx, nova, shimmer) |
-| `ttsSpeed` | `1.3` | Speech speed (0.25 - 4.0) |
+| `ttsSpeed` | `1.2` | Speech speed (0.25 - 4.0) |
 | `silenceThreshold` | `0.01` | RMS threshold for silence detection |
 | `silenceDuration` | `4.0s` | Seconds of silence before stopping recording |
 | `followUpTimeout` | `5.0s` | Seconds to wait for follow-up question |

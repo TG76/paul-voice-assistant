@@ -29,7 +29,7 @@ enum AppSettings {
     static let whisperModel = "whisper-1"
     static let whisperLanguage = "de"
     static let ttsModel = "tts-1"
-    static let ttsVoice = "fable"
+    static let ttsVoice = "onyx"
     static let ttsSpeed = 1.2
 
     static let silenceThreshold: Float = 0.01
