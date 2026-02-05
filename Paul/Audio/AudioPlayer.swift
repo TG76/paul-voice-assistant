@@ -10,7 +10,7 @@ class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var mixerNode: AVAudioMixerNode?
-    private let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false)!
+    private let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
     private var streamingLevel: Float = -160
     private var scheduledBuffers = 0
     private var completedBuffers = 0
